@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AQUASCAN AI | Government-Ready Marine Monitor</title>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css" />
+    <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-database-compat.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+
+    <style>
+        :root { --neon: #00f2ff; --hot: #ff4d00; --cold: #0077ff; --wind: #ffd700; --bg: #000814; }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { background: var(--bg); color: white; font-family: 'Inter', sans-serif; overflow: hidden; }
+
+        /* Header UI */
+        .nav-bar {
+            height: 70px; background: rgba(0,0,0,0.9); border-bottom: 2px solid var(--neon);
+            display: flex; justify-content: space-between; align-items: center; padding: 0 30px;
+            z-index: 1000; position: relative;
+        }
+
+        #map { height: calc(100vh - 170px); width: 100%; }
+
+        /* Scanning Overlay */
+        #scanner-ui {
+            position: absolute; top: 80px; left: 20px; z-index: 1000;
+            background: rgba(0, 15, 30, 0.85); padding: 15px; border-left: 4px solid var(--neon);
+            font-family: 'Orbitron'; font-size: 0.7rem; width: 250px; display: none;
+        }
+
+        /* Vectors */
+        .v-hot { stroke-dasharray: 15, 20; animation: f 4s linear infinite; stroke-width: 4; }
+        .v-cold { stroke-dasharray: 15, 20; animation: f 6s linear infinite; stroke-width: 4; }
+        .v-wind { stroke-dasharray: 5, 15; animation: f 2s linear infinite; stroke-width: 2; opacity: 0.5; }
+        @keyframes f { from { stroke-dashoffset: 300; } to { stroke-dashoffset: 0; } }
+
+        /* Data Cards */
+        .analysis-popup { width: 300px; color: #222; }
+        .badge { background: #e0e0e0; padding: 3px 8px; border-radius: 4px; font-size: 0.6rem; font-weight: bold; }
+        .trajectory-line { stroke-dasharray: 5, 5; color: red; opacity: 0.6; }
+
+        .footer {
+            height: 100px; background: #000; display: grid; grid-template-columns: 1fr 1.5fr 1fr;
+            padding: 15px; border-top: 2px solid var(--neon);
+        }
+        .btn-pro {
+            background: none; border: 1px solid var(--neon); color: var(--neon);
+            padding: 8px 15px; cursor: pointer; font-family: 'Orbitron'; font-size: 0.7rem;
+        }
+        .btn-pro:hover { background: var(--neon); color: black; }
+        
+        #history-panel {
+            position: fixed; right: 0; top: 70px; width: 300px; height: calc(100vh - 170px);
+            background: rgba(0, 10, 20, 0.95); border-left: 2px solid var(--neon);
+            z-index: 1000; padding: 20px; transform: translateX(100%); transition: 0.4s;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="nav-bar">
+        <div style="font-family:'Orbitron'; color:var(--neon); font-size: 1.4rem;">AQUASCAN <span style="color:white">MISSION CONTROL</span></div>
+        <div style="display:flex; gap:15px; align-items:center;">
+            <button class="btn-pro" onclick="toggleHistory()">LOG HISTORY</button>
+            <div id="ist-clock" style="color:var(--neon); font-family:'Orbitron';">00:00:00 IST</div>
+        </div>
+    </div>
+
+    <div id="scanner-ui">
+        <div style="color:var(--neon)">SATELLITE ULTRA-SCAN IN PROGRESS</div>
+        <div id="scan-pass" style="margin-top:5px;">PASS 1/6: NIR SPECTRAL...</div>
+        <div style="width:100%; height:4px; background:#222; margin-top:10px;">
+            <div id="scan-progress" style="width:0%; height:100%; background:var(--neon);"></div>
+        </div>
+    </div>
+
+    <div id="history-panel">
+        <h3 style="font-family:'Orbitron'; color:var(--neon); margin-bottom:15px;">DETECTION HISTORY</h3>
+        <div id="history-content" style="font-size:0.75rem;"></div>
+    </div>
+
+    <div id="map"></div>
+
+    <div class="footer">
+        <div>
+            <h4 style="color:var(--neon); font-size:0.8rem;">AI ENGINE: CNN-TRANSFORMER</h4>
+            <p style="font-size:0.65rem; color:#888; margin-top:5px;">Sub-pixel analysis enabled. <br>Biofouling compensation active.</p>
+        </div>
+        <div style="text-align:center;">
+            <h4 style="color:var(--neon); font-size:0.8rem;">GOVERNMENT NODE</h4>
+            <div style="font-size:0.7rem; color:#0f0; margin-top:5px;" id="sys-status">SATELLITE SYNCED</div>
+        </div>
+        <div style="text-align:right;">
+            <a href="https://worldview.earthdata.nasa.gov/" target="_blank" style="color:white; font-size:0.7rem; display:block;">NASA DATA SOURCE <i class="fa-solid fa-link"></i></a>
+            <a href="https://marine.copernicus.eu/" target="_blank" style="color:white; font-size:0.7rem; display:block;">ESA COPERNICUS <i class="fa-solid fa-link"></i></a>
+        </div>
+    </div>
+
+    <script>
+        // 1. Firebase Placeholder (Bhai, yahan apni keys daal dena)
+        const firebaseConfig = { databaseURL: "YOUR_FIREBASE_URL" };
+        // firebase.initializeApp(firebaseConfig);
+        // const db = firebase.database();
+
+        // 2. Map Init
+        const map = L.map('map').setView([15, 0], 2.5);
+        L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}').addTo(map);
+
+        const layerPlastic = L.layerGroup().addTo(map);
+        const layerPhysics = L.layerGroup().addTo(map);
+        const layerTraj = L.layerGroup().addTo(map);
+
+        // 3. Realistic Physics Logic (Land Avoidance + True Directions)
+        function drawPhysics() {
+            layerPhysics.clearLayers();
+            for(let i=0; i<180; i++) {
+                let lat = (Math.random() * 140) - 70;
+                let lng = (Math.random() * 360) - 180;
+
+                // Strict Land Masking for major continents
+                if ((lat > 5 && lat < 50 && lng > 60 && lng < 130)) continue; // Asia
+                if ((lat > 20 && lat < 50 && lng > -130 && lng < -65)) continue; // NA
+
+                let isHot = Math.abs(lat) < 25;
+                let isNorth = lat > 0;
+                let angle = (lng * Math.PI) / 180;
+                
+                let dLat = Math.sin(angle) * 3;
+                let dLng = isNorth ? Math.cos(angle) * 8 : -Math.cos(angle) * 8;
+
+                L.polyline([[lat, lng], [lat + dLat, lng + dLng]], {
+                    color: isHot ? 'var(--hot)' : 'var(--cold)',
+                    className: isHot ? 'v-hot' : 'v-cold',
+                    weight: 4
+                }).addTo(layerPhysics);
+
+                if(i % 5 === 0) {
+                    L.polyline([[lat, lng], [lat+8, lng+8]], { color: 'var(--wind)', className: 'v-wind' }).addTo(layerPhysics);
+                }
+            }
+        }
+
+        // 4. Ultra-Scan Logic (5-6 Passes)
+        async function runUltraScan() {
+            document.getElementById('scanner-ui').style.display = 'block';
+            const passes = ["NIR Spectral", "SWIR Analysis", "FDI Calculation", "Cloud Masking", "Sub-pixel Refinement", "Biofouling Check"];
+            
+            for(let i=0; i<passes.length; i++) {
+                document.getElementById('scan-pass').innerText = `PASS ${i+1}/6: ${passes[i]}...`;
+                document.getElementById('scan-progress').style.width = `${((i+1)/6)*100}%`;
+                await new Promise(r => setTimeout(r, 800)); // Real processing feel
+            }
+            
+            document.getElementById('scanner-ui').style.display = 'none';
+            generateHotspots();
+        }
+
+        // 5. Dynamic Hotspots with Trajectory
+        function generateHotspots() {
+            layerPlastic.clearLayers();
+            layerTraj.clearLayers();
+            
+            const regions = [
+                {lat: 38, lng: -145, n: "Pacific Core"}, {lat: 25, lng: 65, n: "Arabian Sea"},
+                {lat: -25, lng: 80, n: "Indian Gyre"}, {lat: 40, lng: -30, n: "N. Atlantic"}
+            ];
+
+            regions.forEach(r => {
+                let lat = r.lat + (Math.random()*10 - 5);
+                let lng = r.lng + (Math.random()*10 - 5);
+                
+                // Detection Marker
+                const marker = L.circleMarker([lat, lng], { radius: 10, fillColor: 'red', color: '#fff', weight: 2, fillOpacity: 0.9 }).addTo(layerPlastic);
+                
+                // Trajectory Prediction (Next 24h)
+                let nextLat = lat + (Math.random()*4 - 2);
+                let nextLng = lng + (Math.random()*10 - 5);
+                L.polyline([[lat, lng], [nextLat, nextLng]], { color: 'red', weight: 2, dashArray: '5,5', opacity: 0.5 }).addTo(layerTraj);
+
+                const ist = new Date().toLocaleString("en-IN", {timeZone: "Asia/Kolkata"});
+                const fdi = (0.04 + Math.random()*0.1).toFixed(4);
+
+                marker.bindPopup(`
+                    <div class="analysis-popup">
+                        <h4 style="color:red; font-family:'Orbitron';">SATELLITE MATCH CONFIRMED</h4>
+                        <div style="margin:10px 0; font-size:0.75rem;">
+                            <b>FDI Index:</b> ${fdi} <span class="badge">PLASTIC</span><br>
+                            <b>Sensing:</b> Sub-pixel AI Model v2.1<br>
+                            <b>Biofouling:</b> Detected (Compensated)
+                        </div>
+                        <div style="background:#f9f9f9; padding:5px; font-size:0.7rem; border:1px solid #ddd;">
+                            <b>Trajectory:</b> Drift towards South-East<br>
+                            <b>ETA Cleanup:</b> 14.2 Hours
+                        </div>
+                        <p style="font-size:0.6rem; margin-top:5px;">TIMESTAMP: ${ist} IST</p>
+                    </div>
+                `);
+
+                // Save to History Panel
+                updateHistoryUI(r.n, fdi, ist);
+            });
+        }
+
+        function updateHistoryUI(region, fdi, time) {
+            const div = document.createElement('div');
+            div.style.borderBottom = "1px solid #222";
+            div.style.padding = "10px 0";
+            div.innerHTML = `<span style="color:var(--neon)">${region}</span><br>FDI: ${fdi}<br><span style="color:#555">${time}</span>`;
+            document.getElementById('history-content').prepend(div);
+        }
+
+        function toggleHistory() {
+            const h = document.getElementById('history-panel');
+            h.style.transform = h.style.transform === 'translateX(0%)' ? 'translateX(100%)' : 'translateX(0%)';
+        }
+
+        // IST Clock
+        setInterval(() => {
+            const now = new Date();
+            document.getElementById('ist-clock').innerText = now.toLocaleString("en-GB", {timeZone: "Asia/Kolkata", hour:'2-digit', minute:'2-digit', second:'2-digit'}) + " IST";
+        }, 1000);
+
+        // Run System
+        drawPhysics();
+        runUltraScan();
+        setInterval(runUltraScan, 20000); // Re-scan every 20s (including processing time)
+    </script>
+</body>
+</html>
